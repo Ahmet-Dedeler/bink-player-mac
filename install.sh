@@ -19,4 +19,4 @@ else
 fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DST"
 build/set_default_handler 2>/dev/null || true
-echo "Installed $DST — double-click any .bk2 or .bik file to play it."
+echo "Installed $DST. Double-click any .bk2 or .bik file to play it."
