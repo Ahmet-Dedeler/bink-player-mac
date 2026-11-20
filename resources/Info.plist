@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Bink Player</string>
+  <key>CFBundleDisplayName</key>
+  <string>Bink Player</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.local.binkplayer.hud</string>
+  <key>CFBundleVersion</key>
+  <string>1.2</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.2</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleExecutable</key>
+  <string>BinkPlayerLauncher</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>CFBundleIconFile</key>
+  <string>BinkPlayer</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.radgametools.bink2</string>
+      <key>UTTypeDescription</key>
+      <string>Bink 2 Video</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.movie</string>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>bk2</string>
+        </array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.radgametools.bink</string>
+      <key>UTTypeDescription</key>
+      <string>Bink Video</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.movie</string>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>bik</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Bink 2 Video</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>com.radgametools.bink2</string>
+        <string>com.radgametools.bink</string>
+      </array>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>bk2</string>
+        <string>bik</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+    </dict>
+  </array>
+</dict>
+</plist>
