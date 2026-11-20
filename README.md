@@ -56,6 +56,8 @@ RAD Game Tools (now part of Epic Games) gives away a [Bink Video Player for macO
 2. Adds `libBinkHUD.dylib` (in `src/`), which is loaded into the player and adds the controls. It hooks the player's Metal draw loop to seek, pause and step, and hooks `AudioQueueNewOutput` for volume and mute.
 3. Adds a small launcher app so Finder can open files with it.
 
+Other apps can also use it as a decoder. With `BINKHUD_EMBED=<file>` set, the player window stays invisible and every frame, plus playback status, is written to that file, while commands (pause, seek, volume, loop) are read back from it. [PercyStar](https://github.com/rpatty-dev/PercyStar) uses this to play `.bk2` files inside its own preview panel. The file format is documented at the top of `src/embed.inc`.
+
 The dylib uses fixed offsets into that exact build of RAD's player. If RAD ships a new version, the hash check fails and the build stops instead of producing a broken app.
 
 ## FAQ

@@ -13,3 +13,9 @@ macOS player for RAD Bink 2 (`.bk2`) videos: RAD's `BinkMacArmPlayer` (patched, 
 
 ## Hardcoded binary offsets
 All addresses in `bink_hud_init` (globals at `0x56f..`, functions `BinkGoto 0x6ea8`, etc.) and the `BINKSNDTRACK` patch at file offset `0xe44c` only match the RAD build pinned by hash in `build.sh`. Don't swap the RAD binary without re-deriving them.
+
+## Embed mode (`src/embed.inc`)
+- `BINKHUD_EMBED=<file>` makes the player a headless decoder for another app (PercyStar's preview panel): invisible click-through window, no HUD, no focus, audio on. Frame/status/command layout is documented at the top of `embed.inc`; PercyStar's `src/bink_embed.rs` is the host side, so change both together.
+- Frames are copied by a blit encoded into the player's own command buffer (hooked `presentDrawable:`), so never read the drawable from a separate queue.
+- Test it silently with `BINKHUD_VOLUME=0`.
+

@@ -722,6 +722,7 @@ static BinkHUDController *g_hud = nil;
 @end
 
 #include "test_ctl.inc"
+#include "embed.inc"
 
 static IMP orig_initFromShaders = NULL;
 static id swizzled_initFromShaders(id self, SEL _cmd, id shaders, void *bink, void *userPtr) {
@@ -731,7 +732,8 @@ static id swizzled_initFromShaders(id self, SEL _cmd, id shaders, void *bink, vo
 
 static IMP orig_drawInMTKView = NULL;
 static void swizzled_drawInMTKView(id self, SEL _cmd, MTKView *view) {
-    if (!g_hud.hudWindow && view.window) {
+    if (g_embed) embed_prepare_view(view);
+    else if (!g_hud.hudWindow && view.window) {
         NSWindow *w = view.window;
         dispatch_async(dispatch_get_main_queue(), ^{
             [g_hud attachToWindow:w];
@@ -787,7 +789,9 @@ static void swizzled_drawInMTKView(id self, SEL _cmd, MTKView *view) {
         }
     }
 
+    atomic_store(&g_in_draw, 1);
     ((void (*)(id, SEL, MTKView *))orig_drawInMTKView)(self, _cmd, view);
+    atomic_store(&g_in_draw, 0);
 }
 
 static void swizzled_mouseDown(id self, SEL _cmd, NSEvent *ev) {
@@ -879,6 +883,7 @@ static void bink_hud_init(void) {
     g_userLoop = [prefs() boolForKey:@"loop"];
     if (getenv("BINKHUD_LOOP")) g_userLoop = atoi(getenv("BINKHUD_LOOP")) != 0;   // tests
     if (g_loop_ptr) *g_loop_ptr = 1;
+    embed_init();   // after prefs so BINKHUD_VOLUME wins
 
     g_hud = [[BinkHUDController alloc] init];
     start_test_ctl();
