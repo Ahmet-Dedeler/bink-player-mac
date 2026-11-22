@@ -4,9 +4,9 @@
 # Converts a Bink 2 (.bk2) video to an H.264 + AAC .mp4, video and audio,
 # without any RAD code. It does not use the Bink Player app at all.
 #
-# Decoding: librempeg (an FFmpeg fork) built from our branch that makes its
-# open-source Bink 2 decoder match RAD's output (bit-exact on 1080p/1440p KB2n,
-# near-exact on 720p). Upstream PR: https://github.com/librempeg/librempeg/pull/217
+# Decoding: librempeg (an FFmpeg fork), whose open-source Bink 2 decoder matches
+# RAD's output since https://github.com/librempeg/librempeg/pull/217 (bit-exact
+# on 1080p/1440p KB2n, near-exact on 720p).
 # The first run clones and builds a small decode-only librempeg into
 # ~/Library/Caches/bink-player-mac (a few minutes); later runs reuse it.
 #
@@ -16,8 +16,8 @@
 # Env: BK2MP4_BITRATE (default 12M), BK2MP4_FFMPEG (default: ffmpeg on PATH).
 set -e
 
-REPO=https://github.com/Ahmet-Dedeler/librempeg.git
-COMMIT=a592446c482c750b74ebf94ba600aa98aa182d98   # branch bink2g-rad-conformance
+REPO=https://github.com/librempeg/librempeg.git
+COMMIT=dd0e159631af2d7c8b4b643ce64a50b40f95393f   # master with librempeg#217 merged
 CACHE="${XDG_CACHE_HOME:-$HOME/Library/Caches}/bink-player-mac"
 SRC="$CACHE/librempeg-${COMMIT%"${COMMIT#????????}"}"
 DEC="$SRC/ffmpeg"
