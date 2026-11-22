@@ -191,6 +191,7 @@ static void embed_init(void) {
     g_embed_fd = open(p, O_RDWR);
     if (g_embed_fd < 0) return;
     g_embed = YES;
+    prevent_regular_activation();
     if (getenv("BINKHUD_VOLUME")) g_volume = fminf(1.0f, fmaxf(0.0f, (float)atof(getenv("BINKHUD_VOLUME"))));
     Class appCls = [NSApplication class];
     Method am = class_getInstanceMethod(appCls, @selector(activateIgnoringOtherApps:));

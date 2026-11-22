@@ -722,6 +722,21 @@ static BinkHUDController *g_hud = nil;
 @end
 
 #include "test_ctl.inc"
+
+static BOOL (*orig_setActivationPolicy)(NSApplication *, SEL, NSApplicationActivationPolicy);
+
+static BOOL background_setActivationPolicy(NSApplication *app, SEL cmd, NSApplicationActivationPolicy policy) {
+    if (policy == NSApplicationActivationPolicyRegular) policy = NSApplicationActivationPolicyAccessory;
+    return orig_setActivationPolicy(app, cmd, policy);
+}
+
+static void prevent_regular_activation(void) {
+    if (orig_setActivationPolicy) return;
+    // RAD sets Regular during startup, before our queued background policy takes effect.
+    Method m = class_getInstanceMethod([NSApplication class], @selector(setActivationPolicy:));
+    orig_setActivationPolicy = (void *)method_setImplementation(m, (IMP)background_setActivationPolicy);
+}
+
 #include "embed.inc"
 
 static IMP orig_initFromShaders = NULL;
@@ -868,6 +883,7 @@ static void bink_hud_init(void) {
     // Test mode (tests/drive.py): silent from the first audio buffer, never takes focus,
     // window stays behind everything. Prefs are not touched.
     if (getenv("BINKHUD_TEST")) {
+        prevent_regular_activation();
         g_volume = 0.0f;
         Class appCls = [NSApplication class];
         IMP noop = imp_implementationWithBlock(^(id _self, BOOL flag) {});
