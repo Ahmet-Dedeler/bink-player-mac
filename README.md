@@ -90,7 +90,7 @@ tools/bk2mp4.sh video.bk2            # writes video.mp4 next to it
 tools/bk2mp4.sh video.bk2 out.mp4
 ```
 
-This doesn't use the player or any RAD code. It decodes with [librempeg](https://github.com/librempeg/librempeg) (an FFmpeg fork) built from [our branch](https://github.com/Ahmet-Dedeler/librempeg/tree/bink2g-rad-conformance) of its open-source Bink 2 decoder. That branch adds the in-loop deblocking filter and the fixes needed to match RAD's output: bit-exact on every 1080p and 1440p `KB2n` file we tested, near-exact on 720p (a few pixels off in the bottom 8 rows). Upstream PR: [librempeg/librempeg#217](https://github.com/librempeg/librempeg/pull/217).
+This doesn't use the player or any RAD code. It decodes with [librempeg](https://github.com/librempeg/librempeg) (an FFmpeg fork) and its open-source Bink 2 decoder. Our changes there ([librempeg/librempeg#217](https://github.com/librempeg/librempeg/pull/217), merged) add the in-loop deblocking filter and the fixes needed to match RAD's output: bit-exact on every 1080p and 1440p `KB2n` file we tested, near-exact on 720p (a few pixels off in the bottom 8 rows).
 
 The first run clones and builds a small decode-only librempeg into `~/Library/Caches/bink-player-mac` (under a minute on an M-series Mac). After that, a 30 second 1080p video converts in about 4 seconds. Encoding uses your normal `ffmpeg` (`brew install ffmpeg`) with the Mac's hardware H.264 encoder. Set `BK2MP4_BITRATE` to change the 12 Mbit/s default.
 

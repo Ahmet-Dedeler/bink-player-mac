@@ -21,4 +21,4 @@ All addresses in `bink_hud_init` (globals at `0x56f..`, functions `BinkGoto 0x6e
 
 
 ## tools/bk2mp4.sh
-- Standalone converter, independent of the player: builds librempeg at the pinned `COMMIT` (Ahmet-Dedeler/librempeg branch `bink2g-rad-conformance`) into `~/Library/Caches/bink-player-mac` and pipes NUT into Homebrew ffmpeg. When the branch moves (or #217 merges upstream), bump `COMMIT`; the cache dir is keyed on it.
+- Standalone converter, independent of the player: builds upstream librempeg at the pinned `COMMIT` (master, after #217 merged) into `~/Library/Caches/bink-player-mac` and pipes NUT into Homebrew ffmpeg. Bump `COMMIT` for upstream Bink 2 fixes; the cache dir is keyed on it.
