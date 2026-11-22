@@ -84,6 +84,16 @@ python3 tests/drive.py video.bk2 "seek 10;0.5;state;skip -5;0.3;state"
 
 It prints the frame number after each step and how long each seek took. `tests/shot.sh` screenshots a test window in the background.
 
+## Related projects
+
+- [Percy6Stars](https://github.com/Ahmet-Dedeler/Percy6Stars): RPF9/TTPF archive explorer for macOS and Windows
+- [awesome-gta6-reverse-engineering](https://github.com/Ahmet-Dedeler/awesome-gta6-reverse-engineering): every open-source GTA VI reverse engineering project in one list
+- [bcpack-rs](https://github.com/Ahmet-Dedeler/bcpack-rs): clean-room decoder for Xbox Series BCPack textures
+- [rage9-re](https://github.com/Ahmet-Dedeler/rage9-re): `script.rpf` and `anim.rpf` decoder with glTF export
+- [weather-study](https://github.com/Ahmet-Dedeler/weather-study): WebGL2 weather and timecycle visualizer
+
+Questions, previews and format research: [join the Discord](https://discord.gg/reADpA6Cd).
+
 ## License
 
 MIT for the code in this repo (see [LICENSE](LICENSE)). RAD's player is downloaded at build time from radgametools.com and stays under RAD's terms. Bink is a trademark of Epic Games, Inc. This project isn't affiliated with RAD Game Tools or Epic Games.
