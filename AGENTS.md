@@ -19,3 +19,6 @@ All addresses in `bink_hud_init` (globals at `0x56f..`, functions `BinkGoto 0x6e
 - Frames are copied by a blit encoded into the player's own command buffer (hooked `presentDrawable:`), so never read the drawable from a separate queue.
 - Test it silently with `BINKHUD_VOLUME=0`.
 
+
+## tools/bk2mp4.sh
+- Standalone converter, independent of the player: builds librempeg at the pinned `COMMIT` (Ahmet-Dedeler/librempeg branch `bink2g-rad-conformance`) into `~/Library/Caches/bink-player-mac` and pipes NUT into Homebrew ffmpeg. When the branch moves (or #217 merges upstream), bump `COMMIT`; the cache dir is keyed on it.

@@ -75,10 +75,24 @@ Install this, then double-click the file. Or drag it onto Bink Player.
 No. They play old Bink 1 `.bik` files in some cases, but not Bink 2 (`KB2` header). Bink 2 is a proprietary codec and only RAD's decoder supports it.
 
 **Can it convert .bk2 to .mp4?**
-Not yet. On Windows, RAD's free RAD Video Tools can convert Bink files.
+Yes, with `tools/bk2mp4.sh` (see [Convert to mp4](#convert-to-mp4)). It keeps the video and every audio track and doesn't need RAD's code.
 
 **Does it work on Intel Macs?**
 No, only Apple Silicon. RAD has a separate Intel player and the offsets would need redoing for it.
+
+## Convert to mp4
+
+```bash
+tools/bk2mp4.sh video.bk2            # writes video.mp4 next to it
+```
+
+```bash
+tools/bk2mp4.sh video.bk2 out.mp4
+```
+
+This doesn't use the player or any RAD code. It decodes with [librempeg](https://github.com/librempeg/librempeg) (an FFmpeg fork) built from [our branch](https://github.com/Ahmet-Dedeler/librempeg/tree/bink2g-rad-conformance) of its open-source Bink 2 decoder. That branch adds the in-loop deblocking filter and the fixes needed to match RAD's output: bit-exact on every 1080p and 1440p `KB2n` file we tested, near-exact on 720p (a few pixels off in the bottom 8 rows). Upstream PR: [librempeg/librempeg#217](https://github.com/librempeg/librempeg/pull/217).
+
+The first run clones and builds a small decode-only librempeg into `~/Library/Caches/bink-player-mac` (under a minute on an M-series Mac). After that, a 30 second 1080p video converts in about 4 seconds. Encoding uses your normal `ffmpeg` (`brew install ffmpeg`) with the Mac's hardware H.264 encoder. Set `BK2MP4_BITRATE` to change the 12 Mbit/s default.
 
 ## Development
 
