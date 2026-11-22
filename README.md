@@ -2,6 +2,12 @@
 
 Play Bink 2 (`.bk2`) and Bink (`.bik`) video files on macOS, with normal player controls: play/pause, a seek bar, ±5s skip, volume, loop and fullscreen. Double-click a `.bk2` in Finder and it opens like any other video.
 
+<p align="center">
+  <a href="https://discord.gg/reADpA6Cd"><img src="https://img.shields.io/badge/Join%20the%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Discord" height="36" /></a>
+  <br />
+  <sub>Questions, previews, bug reports and format research. Come say hi.</sub>
+</p>
+
 ![Bink Player controls](docs/controls.png)
 
 Bink is the video format a lot of games use for cutscenes, intros and in-game screens. QuickTime, VLC, IINA, mpv and FFmpeg can't decode Bink 2, so on a Mac the only option was RAD's own free player, which has no UI at all (no seek bar, no pause button, and it quits when the video ends). This project wraps that player with a QuickTime-style HUD.
