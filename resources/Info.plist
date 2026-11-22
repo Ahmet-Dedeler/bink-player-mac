@@ -16,6 +16,9 @@
   <string>APPL</string>
   <key>CFBundleExecutable</key>
   <string>BinkPlayerLauncher</string>
+  <!-- Headless callers launch the embedded player directly. The GUI launcher opts into the Dock. -->
+  <key>LSUIElement</key>
+  <true/>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
   <key>CFBundleIconFile</key>
