@@ -4,6 +4,7 @@
 
 @interface LauncherDelegate : NSObject <NSApplicationDelegate>
 @property (assign) BOOL launched;
+@property (strong) NSOpenPanel *openPanel;
 @end
 
 @implementation LauncherDelegate
@@ -11,11 +12,17 @@
 - (void)launchVideo:(NSString *)path {
     if (self.launched) return;
     self.launched = YES;
+    if (self.openPanel) {
+        [self.openPanel close];
+        self.openPanel = nil;
+    }
 
-    // Close any already-running BinkMacArmPlayer so audio doesn't overlap when clicking through videos
+    // Close any already-running regular GUI BinkMacArmPlayer so audio doesn't overlap
+    // when clicking through videos, without killing headless embed/test instances.
     for (NSRunningApplication *app in [[NSWorkspace sharedWorkspace] runningApplications]) {
-        if ([app.localizedName isEqualToString:@"BinkMacArmPlayer"] ||
-            [app.executableURL.lastPathComponent isEqualToString:@"BinkMacArmPlayer"]) {
+        if (app.activationPolicy == NSApplicationActivationPolicyRegular &&
+            ([app.localizedName isEqualToString:@"BinkMacArmPlayer"] ||
+             [app.executableURL.lastPathComponent isEqualToString:@"BinkMacArmPlayer"])) {
             kill(app.processIdentifier, SIGTERM);
         }
     }
@@ -53,7 +60,10 @@
     NSArray<NSString *> *args = [[NSProcessInfo processInfo] arguments];
     for (NSUInteger i = 1; i < args.count; i++) {
         NSString *a = args[i];
-        if (![a hasPrefix:@"-"] && [[NSFileManager defaultManager] fileExistsAtPath:a]) {
+        BOOL isDir = NO;
+        if (![a hasPrefix:@"-"] &&
+            [[NSFileManager defaultManager] fileExistsAtPath:a isDirectory:&isDir] &&
+            !isDir) {
             [self launchVideo:a];
             return;
         }
@@ -71,11 +81,16 @@
         if ([[NSFileManager defaultManager] fileExistsAtPath:dir]) {
             panel.directoryURL = [NSURL fileURLWithPath:dir];
         }
-        if ([panel runModal] == NSModalResponseOK && panel.URL) {
-            [self launchVideo:panel.URL.path];
-        } else {
-            [NSApp terminate:nil];
-        }
+        self.openPanel = panel;
+        [panel beginWithCompletionHandler:^(NSModalResponse result) {
+            self.openPanel = nil;
+            if (self.launched) return;
+            if (result == NSModalResponseOK && panel.URL) {
+                [self launchVideo:panel.URL.path];
+            } else {
+                [NSApp terminate:nil];
+            }
+        }];
     });
 }
 @end

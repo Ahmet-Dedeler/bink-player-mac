@@ -23,8 +23,8 @@ static _Atomic int32_t g_muted_flag = 0;
 static pthread_mutex_t g_qlock = PTHREAD_MUTEX_INITIALIZER;
 
 static void apply_volume(void) {
-    float v = atomic_load(&g_muted_flag) ? 0.0f : g_volume;
     pthread_mutex_lock(&g_qlock);
+    float v = atomic_load(&g_muted_flag) ? 0.0f : g_volume;
     for (int i = 0; i < g_numQueues; i++) AudioQueueSetParameter(g_queues[i], kAudioQueueParam_Volume, v);
     pthread_mutex_unlock(&g_qlock);
 }
@@ -35,8 +35,8 @@ static OSStatus hud_AudioQueueNewOutput(const AudioStreamBasicDescription *fmt, 
     if (st == noErr && outAQ && *outAQ) {
         pthread_mutex_lock(&g_qlock);
         if (g_numQueues < MAX_QUEUES) g_queues[g_numQueues++] = *outAQ;
-        pthread_mutex_unlock(&g_qlock);
         AudioQueueSetParameter(*outAQ, kAudioQueueParam_Volume, atomic_load(&g_muted_flag) ? 0.0f : g_volume);
+        pthread_mutex_unlock(&g_qlock);
     }
     return st;
 }
@@ -115,8 +115,8 @@ static NSUserDefaults *prefs(void) {
 }
 
 static BinkHeader *current_bink(void) {
-    if (g_bink_captured) return g_bink_captured;
-    return g_bink_ptr ? *g_bink_ptr : NULL;
+    if (g_bink_ptr) return *g_bink_ptr;
+    return g_bink_captured;
 }
 
 static uint32_t find_nearest_keyframe(void *bnk, uint32_t targetFrame1) {
@@ -148,26 +148,41 @@ static void configure_all_audio_tracks(const char *path) {
     if (!path || !g_base) return;
     FILE *f = fopen(path, "rb");
     if (!f) return;
-    uint8_t hdr[256];
+    uint8_t hdr[44];
     size_t n = fread(hdr, 1, sizeof(hdr), f);
-    fclose(f);
-    if (n < 52) return;
-
-    size_t trackTableOff = (hdr[0] == 'K' && hdr[1] == 'B' && hdr[2] == '2') ? 48 : 44;
-    uint32_t ntracks = *(uint32_t *)(hdr + 40);
-    if (ntracks == 0) {
-        *(uint32_t *)(g_base + 0x558dc) = 0;
+    if (n < 44) {
+        fclose(f);
         return;
     }
-    if (ntracks > 16) ntracks = 16;
-    size_t idsOff = trackTableOff + 8 * ntracks;
-    if (idsOff + 4 * ntracks > n) return;
+
+    BOOL hasExtra = (hdr[0] == 'B' && hdr[1] == 'I' && hdr[2] == 'K' && hdr[3] == 'k') ||
+                    (hdr[0] == 'K' && hdr[1] == 'B' && hdr[2] == '2' &&
+                     (hdr[3] == 'i' || hdr[3] == 'j' || hdr[3] == 'k' || hdr[3] == 'm' || hdr[3] == 'n'));
+    size_t trackTableOff = hasExtra ? 48 : 44;
+    uint32_t rawTracks = 0;
+    memcpy(&rawTracks, hdr + 40, sizeof(rawTracks));
+    uint32_t totalTracks = rawTracks & 0xbfffffffU;
+    if (totalTracks == 0) {
+        *(uint32_t *)(g_base + 0x558dc) = 0;
+        fclose(f);
+        return;
+    }
+
+    size_t idsOff = trackTableOff + 8 * (size_t)totalTracks;
+    uint32_t openTracks = totalTracks > 16 ? 16 : totalTracks;
+    uint32_t trackIDs[16];
+    if (fseeko(f, (off_t)idsOff, SEEK_SET) != 0 ||
+        fread(trackIDs, sizeof(uint32_t), openTracks, f) != openTracks) {
+        fclose(f);
+        return;
+    }
+    fclose(f);
 
     uint32_t *g_num_tracks = (uint32_t *)(g_base + 0x558dc);
     uint32_t *g_track_ids  = (uint32_t *)(g_base + 0x55d70);
-    *g_num_tracks = ntracks;
-    for (uint32_t i = 0; i < ntracks; i++) {
-        g_track_ids[i] = *(uint32_t *)(hdr + idsOff + 4 * i);
+    *g_num_tracks = openTracks;
+    for (uint32_t i = 0; i < openTracks; i++) {
+        g_track_ids[i] = trackIDs[i];
     }
 }
 
@@ -177,6 +192,12 @@ static void perform_clean_seek(void *bnk, uint32_t targetFrame1, int exact) {
     if (h->Frames == 0) return;
     if (targetFrame1 < 1) targetFrame1 = 1;
     if (targetFrame1 > h->Frames) targetFrame1 = h->Frames;
+
+    uint32_t kf = find_nearest_keyframe(bnk, targetFrame1);
+    if (!exact && targetFrame1 - kf > 150) {
+        // Live drag preview: never yank back to a distant keyframe; wait for mouse-up exact seek.
+        return;
+    }
 
     void *tex = g_tex_ptr ? *g_tex_ptr : NULL;
     TexUpdateFn startTex  = tex ? *(TexUpdateFn *)((uint8_t *)tex + 0) : NULL;
@@ -195,8 +216,6 @@ static void perform_clean_seek(void *bnk, uint32_t targetFrame1, int exact) {
         fn_BinkSetSoundOnOff(bnk, 0);
     }
 
-    uint32_t kf = find_nearest_keyframe(bnk, targetFrame1);
-
     // Decide startFrame and endFrame:
     // - On exact seek (click / slider release / ±5s): ALWAYS land on targetFrame1!
     //   If seeking forward and no keyframe lies between curFrame and targetFrame1,
@@ -205,17 +224,8 @@ static void perform_clean_seek(void *bnk, uint32_t targetFrame1, int exact) {
     uint32_t endFrame = targetFrame1;
 
     if (!exact) {
-        // Live drag preview: only snap to keyframe if there's a nearby keyframe (<= 5s away)
-        // Never yank back to 00:00 on single-keyframe videos!
-        if (targetFrame1 - kf <= 150) {
-            startFrame = kf;
-            endFrame = kf;
-        } else {
-            // Re-kick current frame so invariant holds, wait for mouse-up exact seek
-            if (fn_BinkSetSoundOnOff && !wasMuted) fn_BinkSetSoundOnOff(bnk, 1);
-            startFrame = curFrame;
-            endFrame = curFrame;
-        }
+        startFrame = kf;
+        endFrame = kf;
     } else {
         if (targetFrame1 > curFrame && kf <= curFrame) {
             startFrame = curFrame + 1;
@@ -227,6 +237,11 @@ static void perform_clean_seek(void *bnk, uint32_t targetFrame1, int exact) {
         // at roughly 0.25 ms per 1440p frame, so even a long run is well under a second.
     }
 
+    BOOL willBePaused = g_paused_ptr &&
+                        ((*g_paused_ptr != 0) ^ ((g_input_flags_ptr && (*g_input_flags_ptr & 0x2)) != 0));
+    BOOL stopAtEnd = (!g_userLoop && h->Frames > 1 && endFrame >= h->Frames);
+    BOOL holdFrame = willBePaused || stopAtEnd;
+
     for (uint32_t f = startFrame; f <= endFrame; f++) {
         if (f == endFrame && fn_BinkSetSoundOnOff && !wasMuted) {
             fn_BinkSetSoundOnOff(bnk, 1);
@@ -235,18 +250,20 @@ static void perform_clean_seek(void *bnk, uint32_t targetFrame1, int exact) {
         if (startTex) startTex(tex);
         fn_BinkDoFrameAsyncMulti(bnk, g_threads_ptr, nthreads);
         while (!fn_BinkDoFrameAsyncWait(bnk, 100000)) {}
-        if (f < endFrame) {
+        if (f < endFrame || holdFrame) {
             if (finishTex) finishTex(tex);
         }
     }
 
     g_lastSeenFrame = h->FrameNum;   // a seek is not a wrap-around
+    g_stoppedAtEnd = stopAtEnd;
     *(uint32_t *)((uint8_t *)bnk + 0x6e4) = 0;
     *(uint32_t *)((uint8_t *)bnk + 0x6e8) = *(uint32_t *)((uint8_t *)bnk + 0x6d0);
     *(uint32_t *)((uint8_t *)bnk + 0x73c) = 0;
 
-    if (g_paused_ptr && *g_paused_ptr != 0 && g_input_flags_ptr) {
-        *g_input_flags_ptr |= 0x4;
+    if (stopAtEnd && !willBePaused && g_input_flags_ptr) {
+        // Pause on the final frame without advancing/wrapping to frame 1.
+        *g_input_flags_ptr |= 0x2;
     }
 }
 
@@ -484,7 +501,8 @@ static BinkHUDController *g_hud = nil;
     CGFloat scale = MIN(1.0, MIN(maxW / w, maxH / hh));
     NSSize content = NSMakeSize(floor(w * scale), floor(hh * scale));
     win.contentAspectRatio = NSMakeSize(w, hh);
-    win.contentMinSize = NSMakeSize(MIN(content.width, 320), MIN(content.height, 320) * hh / MAX(w, 1));
+    CGFloat minW = MIN(content.width, 320.0);
+    win.contentMinSize = NSMakeSize(minW, floor(minW * hh / MAX(w, 1.0)));
     NSRect frame = [win frameRectForContentRect:NSMakeRect(0, 0, content.width, content.height)];
     frame.origin.x = NSMidX(vis) - frame.size.width / 2;
     frame.origin.y = NSMidY(vis) - frame.size.height / 2;
@@ -494,7 +512,7 @@ static BinkHUDController *g_hud = nil;
 - (void)repositionHUD {
     if (!self.parentWindow || !self.hudWindow) return;
     NSRect pf = [self.parentWindow contentRectForFrameRect:self.parentWindow.frame];
-    CGFloat w = MIN(600.0, MAX(360.0, pf.size.width - 24.0));
+    CGFloat w = MIN(600.0, MAX(460.0, pf.size.width - 24.0));
     CGFloat h = 76.0;
     CGFloat x = pf.origin.x + (pf.size.width - w) * 0.5;
     CGFloat y = pf.origin.y + 22.0;
@@ -666,16 +684,19 @@ static BinkHUDController *g_hud = nil;
 
 - (void)toggleLoop {
     g_userLoop = !g_userLoop;
-    if (!getenv("BINKHUD_TEST")) [prefs() setBool:g_userLoop forKey:@"loop"];
+    if (!getenv("BINKHUD_TEST") && !getenv("BINKHUD_EMBED")) [prefs() setBool:g_userLoop forKey:@"loop"];
     [self syncUI];
     [self showHUD];
 }
 
 - (void)changeVolume:(float)delta {
+    pthread_mutex_lock(&g_qlock);
     g_volume = fminf(1.0f, fmaxf(0.0f, g_volume + delta));
-    if (g_volume > 0 && atomic_load(&g_muted)) atomic_store(&g_muted, 0);
-    if (!getenv("BINKHUD_TEST")) [prefs() setFloat:g_volume forKey:@"volume"];
-    self.volumeSlider.doubleValue = g_volume;
+    float vol = g_volume;
+    pthread_mutex_unlock(&g_qlock);
+    if (vol > 0 && atomic_load(&g_muted)) atomic_store(&g_muted, 0);
+    if (!getenv("BINKHUD_TEST") && !getenv("BINKHUD_EMBED")) [prefs() setFloat:vol forKey:@"volume"];
+    self.volumeSlider.doubleValue = vol;
     apply_volume();
     [self syncUI];
     [self showHUD];
@@ -777,16 +798,22 @@ static void swizzled_drawInMTKView(id self, SEL _cmd, MTKView *view) {
     // Stop on the last frame instead of wrapping (or quitting) when the user has loop off.
     BinkHeader *eh = current_bink();
     if (eh && eh->Frames > 1 && g_paused_ptr && g_input_flags_ptr && atomic_load(&g_pendingSeekFrame) == 0) {
-        BOOL playing = (*g_paused_ptr == 0);
-        if (!g_userLoop && playing && !g_stoppedAtEnd) {
+        BOOL willBePaused = (*g_paused_ptr != 0) ^ ((*g_input_flags_ptr & 0x2) != 0);
+        if (!g_userLoop && !willBePaused && !g_stoppedAtEnd) {
             if (eh->FrameNum >= eh->Frames) {
+                // Final frame was decoded asynchronously on the previous tick; wait for it and
+                // mark textures dirty so orig_drawInMTKView uploads and displays it while paused.
+                if (fn_BinkDoFrameAsyncWait) {
+                    while (!fn_BinkDoFrameAsyncWait(eh, 100000)) {}
+                }
+                void *tex = g_tex_ptr ? *g_tex_ptr : NULL;
+                TexUpdateFn finishTex = tex ? *(TexUpdateFn *)((uint8_t *)tex + 8) : NULL;
+                if (finishTex) finishTex(tex);
                 g_stoppedAtEnd = YES;
                 *g_input_flags_ptr |= 0x2;          // pause right here, on the final frame
-            } else if (g_lastSeenFrame + 5 >= eh->Frames && eh->FrameNum < 5) {
-                // Wrapped before we caught it: put the last frame back and pause.
-                g_stoppedAtEnd = YES;
+            } else if (eh->FrameNum < g_lastSeenFrame && g_lastSeenFrame + 5 >= eh->Frames && eh->FrameNum < 5) {
+                // Wrapped before we caught it: seek back to the last frame, upload it, and pause.
                 perform_clean_seek(eh, eh->Frames, 1);
-                *g_input_flags_ptr |= 0x2;
             }
         }
         g_lastSeenFrame = eh->FrameNum;
@@ -835,10 +862,13 @@ static void swizzled_keyDown(id self, SEL _cmd, NSEvent *ev) {
     if (kc == 36 || kc == 47) { [g_hud stepFrame]; return; }
     if (kc == 126) { [g_hud changeVolume:+0.1f]; return; }
     if (kc == 125) { [g_hud changeVolume:-0.1f]; return; }
-    if ([chars isEqualToString:@"m"]) { [g_hud toggleMute]; return; }
-    if ([chars isEqualToString:@"f"]) { [g_hud toggleFullscreen]; return; }
-    if ([chars isEqualToString:@"l"]) { [g_hud toggleLoop]; return; }
-    if ([chars isEqualToString:@"q"]) { [g_hud requestQuit]; return; }
+    NSEventModifierFlags cmdCtrlOpt = NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption;
+    if (!(mods & cmdCtrlOpt)) {
+        if ([chars isEqualToString:@"m"]) { [g_hud toggleMute]; return; }
+        if ([chars isEqualToString:@"f"]) { [g_hud toggleFullscreen]; return; }
+        if ([chars isEqualToString:@"l"]) { [g_hud toggleLoop]; return; }
+        if ([chars isEqualToString:@"q"]) { [g_hud requestQuit]; return; }
+    }
     if (kc == 53) {
         if (g_hud.parentWindow && (g_hud.parentWindow.styleMask & NSWindowStyleMaskFullScreen)) {
             [g_hud toggleFullscreen];
@@ -881,8 +911,10 @@ static void bink_hud_init(void) {
     }
 
     // Test mode (tests/drive.py): silent from the first audio buffer, never takes focus,
-    // window stays behind everything. Prefs are not touched.
-    if (getenv("BINKHUD_TEST")) {
+    // window stays behind everything. Prefs are not touched in test or embed mode.
+    BOOL isTest = getenv("BINKHUD_TEST") != NULL;
+    BOOL isEmbed = getenv("BINKHUD_EMBED") != NULL;
+    if (isTest) {
         prevent_regular_activation();
         g_volume = 0.0f;
         Class appCls = [NSApplication class];
@@ -894,9 +926,10 @@ static void bink_hud_init(void) {
         Method mk = class_getInstanceMethod([NSWindow class], @selector(makeKeyAndOrderFront:));
         if (mk) method_setImplementation(mk, imp_implementationWithBlock(^(NSWindow *w, id sender) { [w orderBack:nil]; }));
         dispatch_async(dispatch_get_main_queue(), ^{ [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]; });
-    } else
-    if ([prefs() objectForKey:@"volume"]) g_volume = fminf(1.0f, fmaxf(0.0f, [prefs() floatForKey:@"volume"]));
-    g_userLoop = [prefs() boolForKey:@"loop"];
+    } else if (!isEmbed) {
+        if ([prefs() objectForKey:@"volume"]) g_volume = fminf(1.0f, fmaxf(0.0f, [prefs() floatForKey:@"volume"]));
+        g_userLoop = [prefs() boolForKey:@"loop"];
+    }
     if (getenv("BINKHUD_LOOP")) g_userLoop = atoi(getenv("BINKHUD_LOOP")) != 0;   // tests
     if (g_loop_ptr) *g_loop_ptr = 1;
     embed_init();   // after prefs so BINKHUD_VOLUME wins

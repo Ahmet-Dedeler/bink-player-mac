@@ -26,6 +26,7 @@ static void start_test_ctl(void) {
             char line[256];
             while (fgets(line, sizeof line, f)) {
                 NSString *cmd = [[NSString stringWithUTF8String:line] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                if (!cmd || cmd.length == 0) continue;
                 dispatch_async(dispatch_get_main_queue(), ^{
                     NSArray *p = [cmd componentsSeparatedByString:@" "];
                     NSString *c = p.firstObject; double v = p.count > 1 ? [p[1] doubleValue] : 0;
@@ -37,11 +38,9 @@ static void start_test_ctl(void) {
                         hudlog([NSString stringWithFormat:@"win frame=%@ screen=%@ visible=%@ hud=%@ hudAlpha=%.2f fs=%d wid=%ld title=%@", NSStringFromRect(w.frame), NSStringFromRect(w.screen.frame), NSStringFromRect(w.screen.visibleFrame), NSStringFromRect(g_hud.hudWindow.frame), g_hud.hudWindow.alphaValue, (int)((w.styleMask & NSWindowStyleMaskFullScreen) != 0), (long)w.windowNumber, w.title]);
                     }
                     else if ([c isEqualToString:@"skip"]) [g_hud skipSeconds:v];
-                    else if ([c isEqualToString:@"seek"] && h) {
-                        g_hud.scrubber.doubleValue = v * bink_fps(h);
-                        // emulate a slider click-release (exact seek)
-                        atomic_store(&g_pendingSeekExact, 1);
-                        atomic_store(&g_pendingSeekFrame, (int32_t)MAX(1, v * bink_fps(h)));
+                    else if ([c isEqualToString:@"seek"] && h && h->Frames > 0) {
+                        double target = isfinite(v) ? fmin((double)h->Frames, fmax(1.0, v * bink_fps(h))) : 1.0;
+                        [g_hud requestSeek:(int32_t)target exact:1];
                     }
                     else if ([c isEqualToString:@"pause"]) [g_hud togglePlayPause];
                     else if ([c isEqualToString:@"loop"]) { if (g_userLoop != (v != 0)) [g_hud toggleLoop]; }

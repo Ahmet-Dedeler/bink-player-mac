@@ -14,16 +14,33 @@ APP="build/Bink Player.app"
 CACHE="build/cache"
 mkdir -p "$CACHE"
 
+MNT=""
+DMG_TMP=""
+cleanup() {
+  if [[ -n "$MNT" ]]; then
+    hdiutil detach "$MNT" -quiet 2>/dev/null || true
+    rmdir "$MNT" 2>/dev/null || true
+  fi
+  if [[ -n "$DMG_TMP" ]]; then
+    rm -f "$DMG_TMP"
+  fi
+}
+trap cleanup EXIT
+
 # 1. Fetch + verify RAD's player
 if [[ ! -f "$CACHE/BinkMacArmPlayer" ]] || [[ "$(shasum -a 256 "$CACHE/BinkMacArmPlayer" | cut -d' ' -f1)" != "$RAD_BIN_SHA256" ]]; then
   echo "Downloading RAD Bink Video Player for macOS (Apple Silicon)..."
-  curl -fsSL -o "$CACHE/BinkMacArmPlayer.dmg" "$DMG_URL"
+  DMG_TMP="$CACHE/BinkMacArmPlayer.dmg"
+  curl -fsSL -o "$DMG_TMP" "$DMG_URL"
   MNT="$(mktemp -d)"
-  hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$CACHE/BinkMacArmPlayer.dmg" >/dev/null 2>&1
+  hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG_TMP" >/dev/null
   cp "$MNT/BinkMacArmPlayer.app/Contents/MacOS/BinkMacArmPlayer" "$CACHE/BinkMacArmPlayer"
   cp "$MNT/BinkMacArmPlayer.app/Contents/Resources/BinkMacArmPlayer.icns" "$CACHE/BinkPlayer.icns" 2>/dev/null || true
   hdiutil detach "$MNT" -quiet
-  rm -f "$CACHE/BinkMacArmPlayer.dmg"
+  rmdir "$MNT" 2>/dev/null || true
+  MNT=""
+  rm -f "$DMG_TMP"
+  DMG_TMP=""
 fi
 GOT="$(shasum -a 256 "$CACHE/BinkMacArmPlayer" | cut -d' ' -f1)"
 if [[ "$GOT" != "$RAD_BIN_SHA256" ]]; then

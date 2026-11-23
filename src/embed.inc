@@ -23,91 +23,135 @@
 #import <sys/mman.h>
 #import <fcntl.h>
 #import <unistd.h>
+#import <errno.h>
+#import <math.h>
+#import <stddef.h>
+#import <string.h>
 
 #define EMBED_MAGIC 0x4D45424Bu   // "KBEM" little-endian
 #define EMBED_HDR   0x80
+#define EMBED_POOL_SIZE 3
 
 typedef struct {
-    uint32_t magic, version;
+    _Atomic uint32_t magic;
+    uint32_t version;
     _Atomic uint64_t seq;
     uint32_t width, height, stride, pixfmt;
     uint32_t frame, frames, fps_num, fps_den;
     uint32_t paused, muted;
     float volume;
     uint32_t pid;
-    uint32_t cmd_seq, cmd;
+    _Atomic uint32_t cmd_seq;
+    uint32_t cmd;
     double arg;
     uint32_t loop;
 } EmbedHdr;
 _Static_assert(sizeof(EmbedHdr) <= EMBED_HDR, "embed header too big");
+_Static_assert(offsetof(EmbedHdr, cmd_seq) == 0x40, "cmd_seq offset changed");
+_Static_assert(offsetof(EmbedHdr, loop) == 0x50, "loop offset changed");
 
 static BOOL g_embed = NO;
 static int g_embed_fd = -1;
+static pthread_mutex_t g_embed_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t *g_embed_map = NULL;
 static size_t g_embed_len = 0;
 static uint32_t g_embed_last_cmd = 0;
 static uint32_t g_embed_last_frame = UINT32_MAX;
 static int g_embed_idle_draws = 0;
 static _Atomic int g_in_draw = 0;
-static id<MTLBuffer> g_embed_buf = nil;
+static id<MTLBuffer> g_embed_bufs[EMBED_POOL_SIZE];
+static BOOL g_embed_buf_in_use[EMBED_POOL_SIZE];
 static IMP orig_presentDrawable = NULL;
 
 static EmbedHdr *embed_hdr(void) { return (EmbedHdr *)g_embed_map; }
 
-// (Re)size the shared file for width x height frames. Host notices via a changed size.
-static BOOL embed_map(uint32_t w, uint32_t h, uint32_t stride, uint32_t pixfmt) {
+// (Re)size the shared file for width x height frames. Caller must hold g_embed_lock.
+static BOOL embed_map_locked(uint32_t w, uint32_t h, uint32_t stride, uint32_t pixfmt) {
     size_t need = EMBED_HDR + 2 * (size_t)stride * h;
     EmbedHdr *cur = embed_hdr();
-    if (cur && g_embed_len == need && cur->width == w && cur->height == h) return YES;
-    if (g_embed_map) { munmap(g_embed_map, g_embed_len); g_embed_map = NULL; }
+    if (cur && g_embed_len == need && cur->width == w && cur->height == h && cur->stride == stride && cur->pixfmt == pixfmt) {
+        return YES;
+    }
+    if (g_embed_map) {
+        munmap(g_embed_map, g_embed_len);
+        g_embed_map = NULL;
+        g_embed_len = 0;
+    }
     if (ftruncate(g_embed_fd, (off_t)need) != 0) return NO;
     void *m = mmap(NULL, need, PROT_READ | PROT_WRITE, MAP_SHARED, g_embed_fd, 0);
     if (m == MAP_FAILED) return NO;
     g_embed_map = m;
     g_embed_len = need;
     EmbedHdr *e = embed_hdr();
-    // keep any command the host already queued; reset the rest
-    e->magic = EMBED_MAGIC;
+    // keep any command the host already queued; publish metadata before magic with release ordering
     e->version = 1;
     e->width = w; e->height = h; e->stride = stride; e->pixfmt = pixfmt;
     e->pid = (uint32_t)getpid();
+    atomic_store_explicit(&e->magic, EMBED_MAGIC, memory_order_release);
     return YES;
 }
 
 static void embed_publish_status(void) {
-    EmbedHdr *e = embed_hdr();
     BinkHeader *h = current_bink();
-    if (!e || !h) return;
-    e->frame = h->FrameNum;
-    e->frames = h->Frames;
-    e->fps_num = h->FrameRate;
-    e->fps_den = h->FrameRateDiv;
-    e->paused = (g_paused_ptr && *g_paused_ptr != 0) ? 1 : 0;
-    e->muted = (uint32_t)atomic_load(&g_muted);
-    e->volume = g_volume;
-    e->loop = g_userLoop ? 1 : 0;
+    if (!h) return;
+    pthread_mutex_lock(&g_qlock);
+    float vol = g_volume;
+    pthread_mutex_unlock(&g_qlock);
+
+    pthread_mutex_lock(&g_embed_lock);
+    EmbedHdr *e = embed_hdr();
+    if (e) {
+        e->frame = h->FrameNum;
+        e->frames = h->Frames;
+        e->fps_num = h->FrameRate;
+        e->fps_den = h->FrameRateDiv;
+        e->paused = (g_paused_ptr && *g_paused_ptr != 0) ? 1 : 0;
+        e->muted = (uint32_t)atomic_load(&g_muted);
+        e->volume = vol;
+        e->loop = g_userLoop ? 1 : 0;
+    }
+    pthread_mutex_unlock(&g_embed_lock);
 }
 
 static void embed_poll_commands(void) {
+    uint32_t cmd = 0;
+    double arg = 0.0;
+    pthread_mutex_lock(&g_embed_lock);
     EmbedHdr *e = embed_hdr();
-    if (!e) return;
-    uint32_t s = e->cmd_seq;
-    if (s == g_embed_last_cmd) return;
+    if (!e) {
+        pthread_mutex_unlock(&g_embed_lock);
+        return;
+    }
+    uint32_t s = atomic_load_explicit(&e->cmd_seq, memory_order_acquire);
+    if (s == g_embed_last_cmd) {
+        pthread_mutex_unlock(&g_embed_lock);
+        return;
+    }
     g_embed_last_cmd = s;
-    uint32_t cmd = e->cmd;
-    double arg = e->arg;
+    cmd = e->cmd;
+    arg = e->arg;
+    pthread_mutex_unlock(&g_embed_lock);
+
     dispatch_async(dispatch_get_main_queue(), ^{
         BinkHeader *h = current_bink();
         switch (cmd) {
             case 1: [g_hud togglePlayPause]; break;
             case 2:
-                if (h) {
+                if (h && h->Frames > 0 && isfinite(arg)) {
+                    double target = fmin((double)h->Frames, fmax(1.0, arg * bink_fps(h)));
                     atomic_store(&g_pendingSeekExact, 1);
-                    atomic_store(&g_pendingSeekFrame, (int32_t)MAX(1.0, arg * bink_fps(h)));
+                    atomic_store(&g_pendingSeekFrame, (int32_t)target);
                     g_stoppedAtEnd = NO;
                 }
                 break;
-            case 3: g_volume = fminf(1.0f, fmaxf(0.0f, (float)arg)); apply_volume(); break;
+            case 3:
+                if (isfinite(arg)) {
+                    pthread_mutex_lock(&g_qlock);
+                    g_volume = fminf(1.0f, fmaxf(0.0f, (float)arg));
+                    pthread_mutex_unlock(&g_qlock);
+                    apply_volume();
+                }
+                break;
             case 4: atomic_store(&g_muted, atomic_load(&g_muted) ? 0 : 1); apply_volume(); break;
             case 5: g_userLoop = arg != 0; break;
             case 6: [g_hud requestQuit]; break;
@@ -115,29 +159,62 @@ static void embed_poll_commands(void) {
     });
 }
 
-// Encodes texture -> shared buffer into the player's command buffer; copies to the file on completion.
-static void embed_capture(id<MTLCommandBuffer> cb, id<MTLTexture> tex) {
+// Encodes texture -> pooled shared buffer into the player's command buffer; copies to the file on completion.
+static BOOL embed_capture(id<MTLCommandBuffer> cb, id<MTLTexture> tex) {
     uint32_t w = (uint32_t)tex.width, h = (uint32_t)tex.height, stride = w * 4;
-    if (w == 0 || h == 0 || w > 8192 || h > 8192) return;
-    if (!embed_map(w, h, stride, (uint32_t)tex.pixelFormat)) return;
+    if (w == 0 || h == 0 || w > 8192 || h > 8192) return NO;
     size_t bytes = (size_t)stride * h;
-    if (!g_embed_buf || g_embed_buf.length != bytes) {
-        g_embed_buf = [cb.device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
-        if (!g_embed_buf) return;
+
+    int slot = -1;
+    id<MTLBuffer> buf = nil;
+    pthread_mutex_lock(&g_embed_lock);
+    if (!embed_map_locked(w, h, stride, (uint32_t)tex.pixelFormat)) {
+        pthread_mutex_unlock(&g_embed_lock);
+        return NO;
     }
+    for (int i = 0; i < EMBED_POOL_SIZE; i++) {
+        if (!g_embed_buf_in_use[i]) {
+            slot = i;
+            g_embed_buf_in_use[i] = YES;
+            buf = g_embed_bufs[i];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_embed_lock);
+    if (slot < 0) return NO;
+
+    if (!buf || buf.length != bytes) {
+        buf = [cb.device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
+        pthread_mutex_lock(&g_embed_lock);
+        if (!buf) {
+            g_embed_buf_in_use[slot] = NO;
+            pthread_mutex_unlock(&g_embed_lock);
+            return NO;
+        }
+        g_embed_bufs[slot] = buf;
+        pthread_mutex_unlock(&g_embed_lock);
+    }
+
     id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
     [blit copyFromTexture:tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
-               sourceSize:MTLSizeMake(w, h, 1) toBuffer:g_embed_buf destinationOffset:0
+               sourceSize:MTLSizeMake(w, h, 1) toBuffer:buf destinationOffset:0
    destinationBytesPerRow:stride destinationBytesPerImage:bytes];
     [blit endEncoding];
-    id<MTLBuffer> buf = g_embed_buf;
     [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
-        EmbedHdr *e = embed_hdr();
-        if (!e || e->width != w || e->height != h) return;
-        uint64_t next = atomic_load(&e->seq) + 1;
-        memcpy(g_embed_map + EMBED_HDR + (next & 1) * bytes, buf.contents, bytes);
-        atomic_store(&e->seq, next);
+        pthread_mutex_lock(&g_embed_lock);
+        if (done.status == MTLCommandBufferStatusCompleted) {
+            EmbedHdr *e = embed_hdr();
+            if (e && g_embed_len >= EMBED_HDR + 2 * bytes &&
+                e->width == w && e->height == h && e->stride == stride) {
+                uint64_t next = atomic_load_explicit(&e->seq, memory_order_relaxed) + 1;
+                memcpy(g_embed_map + EMBED_HDR + (next & 1) * bytes, buf.contents, bytes);
+                atomic_store_explicit(&e->seq, next, memory_order_release);
+            }
+        }
+        g_embed_buf_in_use[slot] = NO;
+        pthread_mutex_unlock(&g_embed_lock);
     }];
+    return YES;
 }
 
 static void hk_presentDrawable(id self, SEL _cmd, id<MTLDrawable> d) {
@@ -146,9 +223,10 @@ static void hk_presentDrawable(id self, SEL _cmd, id<MTLDrawable> d) {
         uint32_t fn = h ? h->FrameNum : 0;
         // copy on new frames, and now and then while paused so seeks/first frame always land
         if (fn != g_embed_last_frame || ++g_embed_idle_draws >= 15) {
-            g_embed_last_frame = fn;
-            g_embed_idle_draws = 0;
-            embed_capture((id<MTLCommandBuffer>)self, ((id<CAMetalDrawable>)d).texture);
+            if (embed_capture((id<MTLCommandBuffer>)self, ((id<CAMetalDrawable>)d).texture)) {
+                g_embed_last_frame = fn;
+                g_embed_idle_draws = 0;
+            }
         }
     }
     ((void (*)(id, SEL, id))orig_presentDrawable)(self, _cmd, d);
@@ -189,7 +267,10 @@ static void embed_init(void) {
     const char *p = getenv("BINKHUD_EMBED");
     if (!p) return;
     g_embed_fd = open(p, O_RDWR);
-    if (g_embed_fd < 0) return;
+    if (g_embed_fd < 0) {
+        fprintf(stderr, "libBinkHUD: failed to open BINKHUD_EMBED '%s': %s\n", p, strerror(errno));
+        _exit(1);
+    }
     g_embed = YES;
     prevent_regular_activation();
     if (getenv("BINKHUD_VOLUME")) g_volume = fminf(1.0f, fmaxf(0.0f, (float)atof(getenv("BINKHUD_VOLUME"))));
