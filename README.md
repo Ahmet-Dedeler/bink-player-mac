@@ -3,7 +3,7 @@
 Play Bink 2 (`.bk2`) and Bink (`.bik`) video files on macOS, with normal player controls: play/pause, a seek bar, ±5s skip, volume, loop and fullscreen. Double-click a `.bk2` in Finder and it opens like any other video.
 
 <p align="center">
-  <a href="https://discord.gg/reADpA6Cd"><img src="https://img.shields.io/badge/Join%20the%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Discord" height="36" /></a>
+  <a href="https://discord.gg/CjcDBg3nf"><img src="https://img.shields.io/badge/Join%20the%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Discord" height="36" /></a>
   <br />
   <sub>Questions, previews, bug reports and format research. Come say hi.</sub>
 </p>
@@ -112,7 +112,7 @@ It prints the frame number after each step and how long each seek took. `tests/s
 - [rage9-re](https://github.com/Ahmet-Dedeler/rage9-re): `script.rpf` and `anim.rpf` decoder with glTF export
 - [weather-study](https://github.com/Ahmet-Dedeler/weather-study): WebGL2 weather and timecycle visualizer
 
-Questions, previews and format research: [join the Discord](https://discord.gg/reADpA6Cd).
+Questions, previews and format research: [join the Discord](https://discord.gg/CjcDBg3nf).
 
 ## License
 
